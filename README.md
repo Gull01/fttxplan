@@ -5,7 +5,7 @@
 [![CI](https://github.com/Gull01/fttxplan/actions/workflows/ci.yml/badge.svg)](https://github.com/Gull01/fttxplan/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-59%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-62%20passing-brightgreen)
 
 ![A complete design for 1,591 real buildings](docs/images/hero.png)
 
@@ -207,7 +207,7 @@ This is a planning tool. It produces a sound first design and reliable quantitie
 ```bash
 git clone https://github.com/Gull01/fttxplan.git && cd fttxplan
 pip install -e ".[dev,osm]"
-pytest                      # 59 tests including doctests, about 93% coverage
+pytest                      # 62 tests including doctests, about 93% coverage
 ruff check . && ruff format --check .
 python docs/make_figures.py # regenerate the README images
 ```

@@ -195,13 +195,25 @@ def plot_budget(design: Design, ax=None, theme: str = "light"):
     return ax
 
 
-def explore_design(design: Design, tiles: str | None = "OpenStreetMap", show_drops: bool = False, zoom_start: int = 16):
-    """Interactive web map (folium) with toggleable layers and tooltips."""
+#: Background maps for :func:`explore_design`. Esri basemaps also load when the HTML file is opened
+#: straight from disk; OpenStreetMap's own tile servers refuse requests without a web address.
+BASEMAPS = {"Streets": "Esri.WorldStreetMap", "Satellite": "Esri.WorldImagery", "OpenStreetMap": "OpenStreetMap"}
+
+
+def explore_design(design: Design, tiles: str | None = None, show_drops: bool = False, zoom_start: int = 16):
+    """Interactive web map (folium) with toggleable layers and tooltips.
+
+    By default it offers Esri streets and satellite backgrounds (switchable in the layer panel).
+    Pass ``tiles`` (any folium / xyzservices name) to use a single background of your choice.
+    """
     import folium
 
     L = {k: v.to_crs(4326) for k, v in design.layers().items()}
     c = L["olt"].geometry.iloc[0]
     m = folium.Map(location=[c.y, c.x], zoom_start=zoom_start, tiles=tiles, control_scale=True)
+    if tiles is None:
+        for i, (name, provider) in enumerate(BASEMAPS.items()):
+            folium.TileLayer(provider, name=name, overlay=False, control=True, show=i == 0).add_to(m)
     pal = THEMES["light"]
 
     def lines(gdf, name, color, fields, weight, show=True):

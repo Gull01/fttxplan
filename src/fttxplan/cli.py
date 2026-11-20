@@ -90,17 +90,29 @@ def cmd_osm(args) -> int:
         print("This command needs OSMnx:  pip install 'fttxplan[osm]'", file=sys.stderr)
         return 2
     from .design import plan
-    from .network import RoadNetwork
+    from .network import RoadNetwork, osm_request
 
+    point = None
     if args.place:
+        try:
+            area = ox.geocode_to_gdf(args.place)
+            if not area.geom_type.isin(["Polygon", "MultiPolygon"]).any():
+                raise TypeError("not an area")
+        except (TypeError, ValueError):
+            # OSM knows many neighbourhoods only as a point: plan a radius around it instead
+            point = ox.geocode(args.place)
+            print(f"{args.place!r} has no outline in OpenStreetMap, using {args.dist:g} m around {point[0]:.5f},{point[1]:.5f}.")
+    else:
+        point = tuple(float(v) for v in args.point.split(","))
+    if point is None:
         print(f"Downloading roads and buildings for {args.place!r} from OpenStreetMap...")
         net = RoadNetwork.from_osm(args.place)
-        bld = ox.features_from_place(args.place, tags={"building": True})
+        bld = osm_request(ox.features_from_place, args.place, tags={"building": True})
     else:
-        lat, lon = (float(v) for v in args.point.split(","))
+        lat, lon = point
         print(f"Downloading roads and buildings within {args.dist:g} m of {lat},{lon}...")
         net = RoadNetwork.from_osm(point=(lat, lon), dist=args.dist)
-        bld = ox.features_from_point((lat, lon), tags={"building": True}, dist=args.dist)
+        bld = osm_request(ox.features_from_point, (lat, lon), tags={"building": True}, dist=args.dist)
     bld = bld[bld.geom_type.isin(["Polygon", "MultiPolygon"])]
     area = bld.to_crs(net.crs).area
     bld = bld[(area >= args.min_area)].reset_index()
@@ -149,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     where = o.add_mutually_exclusive_group(required=True)
     where.add_argument("--place", help='place name, e.g. "F-7 Markaz, Islamabad, Pakistan"')
     where.add_argument("--point", help="centre as lat,lon")
-    o.add_argument("--dist", type=float, default=600, help="radius in metres around --point (default 600)")
+    o.add_argument("--dist", type=float, default=600, help="radius in metres around --point, or around --place if it has no outline (default 600)")
     o.add_argument("--olt", type=_lonlat, help="OLT location as lon,lat (default: centre of the buildings)")
     o.add_argument("--min-area", type=float, default=30, help="ignore buildings smaller than this, m2 (default 30)")
     _common(o)
@@ -165,7 +177,11 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     with warnings.catch_warnings():
         warnings.simplefilter("default")
-        return args.func(args)
+        try:
+            return args.func(args)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":  # pragma: no cover

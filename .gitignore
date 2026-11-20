@@ -12,3 +12,5 @@ htmlcov/
 fttx_design/
 demo_output/
 *_design/
+cache/
+f7_design/

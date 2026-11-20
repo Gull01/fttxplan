@@ -39,6 +39,50 @@ def _as_geoseries(data, crs=None) -> gpd.GeoSeries:
     return gpd.GeoSeries(list(data), crs=crs)
 
 
+#: Public Overpass API servers, tried in turn when one is busy.
+OVERPASS_SERVERS = ("https://overpass-api.de/api", "https://overpass.private.coffee/api", "https://overpass.kumi.systems/api")
+
+
+def osm_request(func, *args, rounds: int = 2, wait_s: float = 5.0, **kwargs):
+    """Call an OSMnx download function, retrying on busy or unreachable Overpass servers.
+
+    The public servers are often at capacity; each failure moves on to the next server and
+    waits a little longer (5 s, 10 s, 20 s... capped at 60 s).
+    """
+    import time
+
+    import osmnx as ox
+    import requests
+
+    errors = (requests.exceptions.RequestException, ConnectionError)
+    try:
+        from osmnx._errors import InsufficientResponseError, ResponseStatusCodeError
+
+        errors += (ResponseStatusCodeError,)
+        no_data = (InsufficientResponseError,)
+    except ImportError:  # pragma: no cover - older OSMnx
+        no_data = ()
+    original = ox.settings.overpass_url
+    attempts = [url for _ in range(rounds) for url in OVERPASS_SERVERS]
+    try:
+        for i, url in enumerate(attempts):
+            ox.settings.overpass_url = url
+            try:
+                return func(*args, **kwargs)
+            except no_data:
+                raise
+            except errors as exc:
+                if i == len(attempts) - 1:
+                    raise RuntimeError(
+                        "OpenStreetMap's Overpass servers are busy or unreachable right now. Please try again in a few minutes."
+                    ) from exc
+                delay = min(60.0, wait_s * 2 ** (i // len(OVERPASS_SERVERS)))
+                print(f"OpenStreetMap server {url} is busy, trying {attempts[i + 1]} in {delay:g} s...")
+                time.sleep(delay)
+    finally:
+        ox.settings.overpass_url = original
+
+
 class RoadNetwork:
     """An undirected road graph in a metric CRS.
 
@@ -132,18 +176,23 @@ class RoadNetwork:
         """Download roads from OpenStreetMap with OSMnx (``pip install fttxplan[osm]``).
 
         Give one of ``place`` (e.g. ``"F-7, Islamabad, Pakistan"``), ``point`` as ``(lat, lon)``
-        with ``dist`` in metres, or ``bbox`` as ``(west, south, east, north)``.
+        with ``dist`` in metres, or ``bbox`` as ``(west, south, east, north)``. A place that OSM
+        only knows as a point (common for neighbourhoods) is read as ``dist`` metres around it.
         """
         try:
             import osmnx as ox
         except ImportError as exc:  # pragma: no cover - depends on optional extra
             raise ImportError("Downloading from OpenStreetMap needs OSMnx: pip install 'fttxplan[osm]'") from exc
         if place:
-            G = ox.graph_from_place(place, network_type=network_type)
+            try:
+                G = osm_request(ox.graph_from_place, place, network_type=network_type)
+            except (TypeError, ValueError):
+                # many neighbourhoods exist in OSM only as a point, not an outlined area
+                G = osm_request(ox.graph_from_point, ox.geocode(place), dist=dist, network_type=network_type)
         elif point:
-            G = ox.graph_from_point(point, dist=dist, network_type=network_type)
+            G = osm_request(ox.graph_from_point, point, dist=dist, network_type=network_type)
         elif bbox:
-            G = ox.graph_from_bbox(bbox, network_type=network_type)
+            G = osm_request(ox.graph_from_bbox, bbox, network_type=network_type)
         else:
             raise ValueError("Give place=, point= or bbox=")
         edges = ox.graph_to_gdfs(G, nodes=False)
